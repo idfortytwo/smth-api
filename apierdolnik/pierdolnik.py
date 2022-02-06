@@ -2,6 +2,7 @@ import functools
 from http.server import HTTPServer
 from typing import NoReturn, List, Callable, Dict, Tuple
 
+from endpoint import Endpoint
 from server import RequestHandler
 
 
@@ -9,15 +10,16 @@ class Pierdolnik:
     def __init__(self, host='localhost', port=8080) -> None:
         self._host = host
         self._port = port
-        self._routing_map: Dict[str, Tuple[List[str], Callable]] = {}
+        self._routing_map: Dict[str, Tuple[List[str], Endpoint]] = {}
 
     def route(self, path: str, http_methods: List[str]):
-        def decorator(endpoint: Callable):
+        def decorator(func: Callable):
+            endpoint = Endpoint(func)
             self._routing_map[path] = (http_methods, endpoint)
 
-            @functools.wraps(endpoint)
+            @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                return endpoint(*args, **kwargs)
+                return func(*args, **kwargs)
 
             return wrapper
 

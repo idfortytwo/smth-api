@@ -2,9 +2,9 @@ import json
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Dict, Callable, Tuple, List, Optional
+from typing import Dict, Tuple, List
 
-Endpoint = Callable[..., Tuple[any, Optional[int]]]
+from endpoint import Endpoint, not_found_endpoint
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -50,23 +50,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         http_methods, endpoint = self._routing_map.get(path, (None, []))
         if endpoint and http_method in http_methods:
             return endpoint
-        return self._404_endpoint
+        return not_found_endpoint
 
-    def _handle_endpoint(self, endpoint: Endpoint) -> Tuple[any, Optional[int]]:
+    def _handle_endpoint(self, endpoint: Endpoint) -> Tuple[any, int]:
         try:
-            response = endpoint()
-            return self._parse_response(response)
+            response, http_code = endpoint()
         except Exception as e:
             traceback.print_exc()
             return {'error_msg': str(e)}, 500
 
-    def _parse_response(self, result: Tuple[any, Optional[int]]) -> Tuple[any, int]:
-        match result:
-            case response, http_code:
-                if http_code not in self.HTTP_CODES:
-                    raise ValueError(f'Invalid response code {http_code}')
-            case response:
-                http_code = 200
+        if http_code not in self.HTTP_CODES:
+            raise ValueError(f'Invalid response code {http_code} for endpoint {endpoint.func}')
 
         return response, http_code
 
@@ -75,7 +69,3 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(bytes(response_body, 'utf-8'))
-
-    @staticmethod
-    def _404_endpoint():
-        return f'No such endpoint', 404
