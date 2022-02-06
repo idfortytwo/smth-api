@@ -1,7 +1,10 @@
 import json
+import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Dict, Callable, Tuple, List
+from typing import Dict, Callable, Tuple, List, Optional
+
+Endpoint = Callable[..., Tuple[any, Optional[int]]]
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -12,7 +15,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     @classmethod
     def register_routes(cls, routing_map: Dict):
-        cls._routing_map: Dict[str, Tuple[List[str], Callable]] = routing_map
+        cls._routing_map: Dict[str, Tuple[List[str], Endpoint]] = routing_map
 
     # overridding request handling
     def handle_one_request(self):
@@ -38,27 +41,41 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
     def _handle_request(self):
-        http_methods, endpoint = self._routing_map.get(self.path, (None, []))
-        if endpoint and self.command in http_methods:
-            self._parse_endpoint(endpoint)
+        endpoint = self._get_endpoint(path=self.path, http_method=self.command)
+        response, http_code = self._handle_endpoint(endpoint)
+        response_json = json.dumps(response)
+        self._send(response_json, http_code)
 
-    def _parse_endpoint(self, endpoint: Callable):
-        result, http_code = self._get_result_and_code(endpoint)
-        response_body = json.dumps(result)
+    def _get_endpoint(self, path: str, http_method: str) -> Endpoint:
+        http_methods, endpoint = self._routing_map.get(path, (None, []))
+        if endpoint and http_method in http_methods:
+            return endpoint
+        return self._404_endpoint
 
-        print(response_body, http_code)
+    def _handle_endpoint(self, endpoint: Endpoint) -> Tuple[any, Optional[int]]:
+        try:
+            response = endpoint()
+            return self._parse_response(response)
+        except Exception as e:
+            traceback.print_exc()
+            return {'error_msg': str(e)}, 500
 
+    def _parse_response(self, result: Tuple[any, Optional[int]]) -> Tuple[any, int]:
+        match result:
+            case response, http_code:
+                if http_code not in self.HTTP_CODES:
+                    raise ValueError(f'Invalid response code {http_code}')
+            case response:
+                http_code = 200
+
+        return response, http_code
+
+    def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(bytes(response_body, 'utf-8'))
 
-    def _get_result_and_code(self, endpoint: Callable) -> Tuple[any, int]:
-        match endpoint():
-            case result, http_code:
-                if http_code in self.HTTP_CODES:
-                    return result, http_code
-                else:
-                    return {'error_msg': 'Endpoint returned invalid response type'}, 500
-            case result:
-                return result, 200
+    @staticmethod
+    def _404_endpoint():
+        return f'No such endpoint', 404
