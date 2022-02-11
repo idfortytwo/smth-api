@@ -1,11 +1,14 @@
 from pierdolnik import Pierdolnik
 
+
 app = Pierdolnik()
 
 
-@app.route('/', http_methods=['GET', 'POST'])
-def hemlo():
-    return 'hemlo'
+@app.route('/:title/:uid/params', http_methods=['GET', 'POST'])
+def hemlo(title: str, uid: int, name: str, age: int = 0):
+    if age:
+        return f'{uid}: hemlo, {title} {name} of age {age}'
+    return f'{uid}: hemlo, {title} {name}'
 
 
 @app.route('/poshel', http_methods=['GET'])

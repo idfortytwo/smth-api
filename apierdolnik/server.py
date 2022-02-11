@@ -1,10 +1,12 @@
 import json
+import re
 import traceback
+
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Tuple, List
 
-from endpoint import Endpoint, not_found_endpoint
+from endpoint import Endpoint, not_found_endpoint, EndpointParam
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -15,7 +17,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     @classmethod
     def register_routes(cls, routing_map: Dict):
-        cls._routing_map: Dict[str, Tuple[List[str], Endpoint]] = routing_map
+        cls._routing_map: Dict[re.Pattern, Tuple[List[str], Endpoint]] = routing_map
 
     # overridding request handling
     def handle_one_request(self):
@@ -41,20 +43,38 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
     def _handle_request(self):
-        endpoint = self._get_endpoint(path=self.path, http_method=self.command)
-        response, http_code = self._handle_endpoint(endpoint)
+        path, args_str = self._split_path_and_args(self.path)
+
+        endpoint, pos_args = self._get_endpoint_and_pos_params(path=path, http_method=self.command)
+
+        query_args = {}
+        if endpoint != not_found_endpoint and args_str:
+            for arg in args_str.split('&'):
+                k, v = arg.split('=')
+                query_args[k] = v
+
+        response, http_code = self._handle_endpoint(endpoint, {**pos_args, **query_args})
         response_json = json.dumps(response)
         self._send(response_json, http_code)
 
-    def _get_endpoint(self, path: str, http_method: str) -> Endpoint:
-        http_methods, endpoint = self._routing_map.get(path, (None, []))
-        if endpoint and http_method in http_methods:
-            return endpoint
-        return not_found_endpoint
+    def _get_endpoint_and_pos_params(self, path: str, http_method: str):
+        for regex, (http_methods, endpoint) in self._routing_map.items():
+            m = regex.match(path)
+            if m and endpoint and http_method in http_methods:
+                return endpoint, m.groupdict()
 
-    def _handle_endpoint(self, endpoint: Endpoint) -> Tuple[any, int]:
+        return not_found_endpoint, {}
+
+    @staticmethod
+    def _split_path_and_args(url: str):
+        query_index = url.rfind('?')
+        query_pos = query_index if query_index != -1 else len(url)
+        return url[:query_pos], url[query_pos + 1:]
+
+    def _handle_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
-            response, http_code = endpoint()
+            validated_args = self._parse_args(args, endpoint.params)
+            response, http_code = endpoint(**validated_args)
         except Exception as e:
             traceback.print_exc()
             return {'error_msg': str(e)}, 500
@@ -63,6 +83,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             raise ValueError(f'Invalid response code {http_code} for endpoint {endpoint.func}')
 
         return response, http_code
+
+    @staticmethod
+    def _parse_args(args: Dict, params: Dict[str, EndpointParam]) -> Dict:
+        parsed_args = {}
+        for name, param in params.items():
+            arg_value = args.get(name)
+
+            if param.is_required and not arg_value:
+                raise ValueError(f"Argument '{name}' is required")
+
+            try:
+                value = param.type(arg_value) if arg_value else param.default_value
+            except ValueError:
+                raise ValueError(f"Argument '{name}' should have type {param.type.__name__}")
+
+            parsed_args[name] = value
+        return parsed_args
 
     def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)
