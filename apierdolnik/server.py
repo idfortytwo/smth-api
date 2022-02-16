@@ -1,3 +1,4 @@
+import inspect
 import json
 import re
 import traceback
@@ -6,7 +7,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Tuple, List
 
-from endpoint import Endpoint, not_found_endpoint, EndpointParam
+from endpoint import Endpoint, not_found_endpoint
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -73,8 +74,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
-            validated_args = self._parse_args(args, endpoint.params)
-            response, http_code = endpoint(**validated_args)
+            params: Dict[str, inspect.Parameter] = endpoint.params
+            args = self._validate_and_convert_args(args, params)
+            response, http_code = endpoint(**args)
         except Exception as e:
             traceback.print_exc()
             return {'error_msg': str(e)}, 500
@@ -84,22 +86,25 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return response, http_code
 
-    @staticmethod
-    def _parse_args(args: Dict, params: Dict[str, EndpointParam]) -> Dict:
+    def _validate_and_convert_args(self, args: Dict, params: Dict[str, inspect.Parameter]) -> Dict:
         parsed_args = {}
         for name, param in params.items():
             arg_value = args.get(name)
 
-            if param.is_required and not arg_value:
+            if self._no_default_value(param) and not arg_value:
                 raise ValueError(f"Argument '{name}' is required")
 
             try:
-                value = param.type(arg_value) if arg_value else param.default_value
+                value = param.annotation(arg_value) if arg_value else param.default
             except ValueError:
-                raise ValueError(f"Argument '{name}' should have type {param.type.__name__}")
+                raise ValueError(f"Argument '{name}' should have type {param.annotation.__name__}")
 
             parsed_args[name] = value
         return parsed_args
+
+    @staticmethod
+    def _no_default_value(param: inspect.Parameter):
+        return param.default == inspect.Parameter.empty
 
     def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)

@@ -1,19 +1,6 @@
 import inspect
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Type
-from itertools import zip_longest
-
-
-@dataclass(frozen=True)
-class EndpointParam:
-    name: str
-    type: Type
-    is_required: bool
-    default_value: any = None
-
-
-required_sentinel = object()
+from typing import Callable, Dict
 
 
 class Endpoint:
@@ -29,20 +16,11 @@ class Endpoint:
     def params(self):
         return self._params
 
-    # TODO: change to list
-    def _introspect_params(self) -> Dict[str, EndpointParam]:
-        spec = inspect.getfullargspec(self._func)
-        params = {}
-        if spec.args and spec.defaults:
-            for name, default_value in zip_longest(reversed(spec.args), reversed(spec.defaults),
-                                                   fillvalue=required_sentinel):
-                arg_type = spec.annotations[name]
-                if default_value == required_sentinel:
-                    param = EndpointParam(name=name, type=arg_type, is_required=True)
-                else:
-                    param = EndpointParam(name=name, type=arg_type, is_required=False, default_value=default_value)
-                params[name] = param
-        return params
+    def _introspect_params(self) -> Dict[str, inspect.Parameter]:
+        sig = inspect.signature(self._func)
+        for k, v in sig.parameters.items():
+            print(k, v.kind, v.empty)
+        return dict(sig.parameters)
 
     def __call__(self, *args, **kwargs):
         result = self._func(*args, **kwargs)
