@@ -6,7 +6,6 @@ import cgi
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from pprint import pprint
 from typing import Dict, Tuple, List
 
 from endpoint import Endpoint, not_found_endpoint
@@ -60,37 +59,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         if content_type:
             if content_type == 'application/x-www-form-urlencoded':
                 content_length = int(self.headers['Content-Length'])
-                return self.parse_urlencoded(self.rfile, content_length)
+                return RequestParser.parse_urlencoded(self.rfile, content_length)
             elif content_type.split(';')[0] == 'multipart/form-data':
-                return self.parse_multipart(self.rfile, content_type)
+                return RequestParser.parse_multipart(self.rfile, content_type)
         else:
-            return self.parse_query_str(query_str)
-
-    @staticmethod
-    def parse_multipart(content, content_type_header):
-        ctype, pdict = cgi.parse_header(content_type_header)
-        pdict['boundary'] = pdict['boundary'].encode("utf-8")  # noqa
-        fields = cgi.parse_multipart(content, pdict)  # noqa
-        return {
-            key: value[0] if len(value) == 1 else value
-            for key, value
-            in fields.items()
-        }
-
-    @staticmethod
-    def parse_urlencoded(content, content_length: int):
-        body = content.read(content_length)
-        query_str = body.decode()
-        return RequestHandler.parse_query_str(query_str)
-
-    @staticmethod
-    def parse_query_str(query_str: str):
-        query_params = {}
-        if query_str:
-            for query_param in query_str.split('&'):
-                k, v = query_param.split('=')
-                query_params[k] = v
-        return query_params
+            return RequestParser.parse_query_str(query_str)
 
     @staticmethod
     def _split_url_and_query(url: str) -> Tuple[str, str]:
@@ -145,3 +118,31 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(bytes(response_body, 'utf-8'))
+
+
+class RequestParser:
+    @staticmethod
+    def parse_multipart(content, content_type: str):
+        ctype, pdict = cgi.parse_header(content_type)
+        pdict['boundary'] = pdict['boundary'].encode("utf-8")  # noqa
+        fields = cgi.parse_multipart(content, pdict)  # noqa
+        return {
+            key: value[0] if len(value) == 1 else value
+            for key, value
+            in fields.items()
+        }
+
+    @staticmethod
+    def parse_urlencoded(content, content_length: int):
+        body = content.read(content_length)
+        query_str = body.decode()
+        return RequestParser.parse_query_str(query_str)
+
+    @staticmethod
+    def parse_query_str(query_str: str):
+        query_params = {}
+        if query_str:
+            for query_param in query_str.split('&'):
+                k, v = query_param.split('=')
+                query_params[k] = v
+        return query_params
