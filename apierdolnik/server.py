@@ -2,9 +2,11 @@ import inspect
 import json
 import re
 import traceback
+import cgi
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
+from pprint import pprint
 from typing import Dict, Tuple, List
 
 from endpoint import Endpoint, not_found_endpoint
@@ -44,33 +46,65 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
     def _handle_request(self):
-        path, args_str = self._split_path_and_args(self.path)
+        url, query_str = self._split_url_and_query(self.path)
 
-        endpoint, pos_args = self._get_endpoint_and_pos_params(path=path, http_method=self.command)
+        endpoint, positional_params = self._get_endpoint_and_positional_params(url=url, http_method=self.command)
+        named_params = self._extract_named_params(query_str)
 
-        query_args = {}
-        if endpoint != not_found_endpoint and args_str:
-            for arg in args_str.split('&'):
-                k, v = arg.split('=')
-                query_args[k] = v
-
-        response, http_code = self._handle_endpoint(endpoint, {**pos_args, **query_args})
+        response, http_code = self._handle_endpoint(endpoint, {**positional_params, **named_params})
         response_json = json.dumps(response)
         self._send(response_json, http_code)
 
-    def _get_endpoint_and_pos_params(self, path: str, http_method: str):
+    def _extract_named_params(self, query_str: str):
+        content_type = self.headers['Content-Type']
+        if content_type:
+            if content_type == 'application/x-www-form-urlencoded':
+                content_length = int(self.headers['Content-Length'])
+                return self.parse_urlencoded(self.rfile, content_length)
+            elif content_type.split(';')[0] == 'multipart/form-data':
+                return self.parse_multipart(self.rfile, content_type)
+        else:
+            return self.parse_query_str(query_str)
+
+    @staticmethod
+    def parse_multipart(content, content_type_header):
+        ctype, pdict = cgi.parse_header(content_type_header)
+        pdict['boundary'] = pdict['boundary'].encode("utf-8")  # noqa
+        fields = cgi.parse_multipart(content, pdict)  # noqa
+        return {
+            key: value[0] if len(value) == 1 else value
+            for key, value
+            in fields.items()
+        }
+
+    @staticmethod
+    def parse_urlencoded(content, content_length: int):
+        body = content.read(content_length)
+        query_str = body.decode()
+        return RequestHandler.parse_query_str(query_str)
+
+    @staticmethod
+    def parse_query_str(query_str: str):
+        query_params = {}
+        if query_str:
+            for query_param in query_str.split('&'):
+                k, v = query_param.split('=')
+                query_params[k] = v
+        return query_params
+
+    @staticmethod
+    def _split_url_and_query(url: str) -> Tuple[str, str]:
+        query_index = url.rfind('?')
+        query_pos = query_index if query_index != -1 else len(url)
+        return url[:query_pos], url[query_pos + 1:]
+
+    def _get_endpoint_and_positional_params(self, url: str, http_method: str):
         for regex, (http_methods, endpoint) in self._routing_map.items():
-            m = regex.match(path)
+            m = regex.match(url)
             if m and endpoint and http_method in http_methods:
                 return endpoint, m.groupdict()
 
         return not_found_endpoint, {}
-
-    @staticmethod
-    def _split_path_and_args(url: str):
-        query_index = url.rfind('?')
-        query_pos = query_index if query_index != -1 else len(url)
-        return url[:query_pos], url[query_pos + 1:]
 
     def _handle_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
