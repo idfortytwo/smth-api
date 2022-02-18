@@ -18,8 +18,6 @@ class Endpoint:
 
     def _introspect_params(self) -> Dict[str, inspect.Parameter]:
         sig = inspect.signature(self._func)
-        for k, v in sig.parameters.items():
-            print(k, v.kind, v.empty)
         return dict(sig.parameters)
 
     def __call__(self, *args, **kwargs):
