@@ -50,7 +50,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         endpoint, positional_params = self._get_endpoint_and_positional_params(url=url, http_method=self.command)
         named_params = self._extract_named_params(query_str)
 
-        response, http_code = self._handle_endpoint(endpoint, {**positional_params, **named_params})
+        response, http_code = self._handle_endpoint(endpoint, {**named_params, **positional_params})
         response_json = json.dumps(response)
         self._send(response_json, http_code)
 
@@ -62,8 +62,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return RequestParser.parse_urlencoded(self.rfile, content_length)
             elif content_type.split(';')[0] == 'multipart/form-data':
                 return RequestParser.parse_multipart(self.rfile, content_type)
-        else:
-            return RequestParser.parse_query_str(query_str)
+        return RequestParser.parse_query_str(query_str)
 
     @staticmethod
     def _split_url_and_query(url: str) -> Tuple[str, str]:
