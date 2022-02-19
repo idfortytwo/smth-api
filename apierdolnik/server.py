@@ -49,8 +49,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         endpoint, positional_params = self._get_endpoint_and_positional_params(url=url, http_method=self.command)
         named_params = self._extract_named_params(query_str)
+        params = {**named_params, **positional_params}
 
-        response, http_code = self._handle_endpoint(endpoint, {**named_params, **positional_params})
+        response, http_code = self._process_endpoint(endpoint, params)
         response_json = json.dumps(response)
         self._send(response_json, http_code)
 
@@ -78,10 +79,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return not_found_endpoint, {}
 
-    def _handle_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
+    def _process_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
-            params: Dict[str, inspect.Parameter] = endpoint.params
-            args = self._validate_and_convert_args(args, params)
+            endpoint_params: Dict[str, inspect.Parameter] = endpoint.params
+            args = self._validate_and_convert_args(args, endpoint_params)
             response, http_code = endpoint(**args)
         except Exception as e:
             traceback.print_exc()
