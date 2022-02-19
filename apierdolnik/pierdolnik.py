@@ -5,7 +5,7 @@ from http.server import HTTPServer
 from typing import NoReturn, List, Callable, Dict, Tuple
 
 from endpoint import Endpoint
-from server import RequestHandler
+from server.request_handler import RequestHandler
 
 
 class Pierdolnik:
