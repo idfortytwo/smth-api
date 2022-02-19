@@ -2,13 +2,15 @@ import inspect
 import json
 import re
 import traceback
-import cgi
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Tuple, List
 
 from endpoint import Endpoint, not_found_endpoint
+from server.converter import Converter
+from server.request_parser import RequestParser
+from server.validator import Validator
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -93,60 +95,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return response, http_code
 
-    def _validate_and_convert_args(self, args: Dict, params: Dict[str, inspect.Parameter]) -> Dict:
-        parsed_args = {}
-        for name, param in params.items():
-            arg_value = args.get(name)
-
-            if self._no_default_value(param) and not arg_value:
-                raise ValueError(f"Argument '{name}' is required")
-
-            try:
-                param_type = param.annotation
-                if param_type not in (inspect.Parameter.empty, any):
-                    value = param_type(arg_value) if arg_value else param.default
-                else:
-                    value = arg_value
-            except ValueError:
-                raise ValueError(f"Argument '{name}' should have type {param.annotation.__name__}")
-
-            parsed_args[name] = value
-        return parsed_args
-
     @staticmethod
-    def _no_default_value(param: inspect.Parameter):
-        return param.default == inspect.Parameter.empty
+    def _validate_and_convert_args(args: Dict, params: Dict[str, inspect.Parameter]) -> Dict:
+        parsed_args = {}
+        for arg_name, param in params.items():
+            arg_value = args.get(arg_name)
+
+            Validator.validate(arg_name, arg_value, param)
+
+            value = Converter.convert(arg_name, arg_value, param)
+            parsed_args[arg_name] = value
+        return parsed_args
 
     def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(bytes(response_body, 'utf-8'))
-
-
-class RequestParser:
-    @staticmethod
-    def parse_multipart(content, content_type: str):
-        ctype, pdict = cgi.parse_header(content_type)
-        pdict['boundary'] = pdict['boundary'].encode("utf-8")  # noqa
-        fields = cgi.parse_multipart(content, pdict)  # noqa
-        return {
-            key: value[0] if len(value) == 1 else value
-            for key, value
-            in fields.items()
-        }
-
-    @staticmethod
-    def parse_urlencoded(content, content_length: int):
-        body = content.read(content_length)
-        query_str = body.decode()
-        return RequestParser.parse_query_str(query_str)
-
-    @staticmethod
-    def parse_query_str(query_str: str):
-        query_params = {}
-        if query_str:
-            for query_param in query_str.split('&'):
-                k, v = query_param.split('=')
-                query_params[k] = v
-        return query_params
