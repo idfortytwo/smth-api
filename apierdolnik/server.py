@@ -102,7 +102,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 raise ValueError(f"Argument '{name}' is required")
 
             try:
-                value = param.annotation(arg_value) if arg_value else param.default
+                param_type = param.annotation
+                if param_type not in (inspect.Parameter.empty, any):
+                    value = param_type(arg_value) if arg_value else param.default
+                else:
+                    value = arg_value
             except ValueError:
                 raise ValueError(f"Argument '{name}' should have type {param.annotation.__name__}")
 
