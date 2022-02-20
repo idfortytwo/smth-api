@@ -1,11 +1,13 @@
-import inspect
 import json
 import re
 import traceback
+import typing
+import pydantic
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Tuple, List
+from inspect import Parameter
 
 from endpoint import Endpoint, not_found_endpoint
 from server.converter import Converter
@@ -53,19 +55,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         named_params = self._extract_named_params(query_str)
         params = {**named_params, **positional_params}
 
+        self._extract_json(params)
+
         response, http_code = self._process_endpoint(endpoint, params)
         response_json = json.dumps(response)
         self._send(response_json, http_code)
-
-    def _extract_named_params(self, query_str: str):
-        content_type = self.headers['Content-Type']
-        if content_type:
-            if content_type == 'application/x-www-form-urlencoded':
-                content_length = int(self.headers['Content-Length'])
-                return RequestParser.parse_urlencoded(self.rfile, content_length)
-            elif content_type.split(';')[0] == 'multipart/form-data':
-                return RequestParser.parse_multipart(self.rfile, content_type)
-        return RequestParser.parse_query_str(query_str)
 
     @staticmethod
     def _split_url_and_query(url: str) -> Tuple[str, str]:
@@ -81,10 +75,25 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return not_found_endpoint, {}
 
+    def _extract_named_params(self, query_str: str):
+        content_type = self.headers['Content-Type']
+        if content_type:
+            if content_type == 'application/x-www-form-urlencoded':
+                content_length = int(self.headers['Content-Length'])
+                return RequestParser.parse_urlencoded(self.rfile, content_length)
+            elif content_type.split(';')[0] == 'multipart/form-data':
+                return RequestParser.parse_multipart(self.rfile, content_type)
+        return RequestParser.parse_query_str(query_str)
+
+    def _extract_json(self, params: Dict[str, any]):
+        if self.headers['Content-Type'] == 'application/json':
+            json_data = RequestParser.parse_json(self)
+            params['__json_data'] = json_data
+
     def _process_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
-            endpoint_params: Dict[str, inspect.Parameter] = endpoint.params
-            args = self._validate_and_convert_args(args, endpoint_params)
+            endpoint_params: Dict[str, Parameter] = endpoint.params
+            args = self._process_args(args, endpoint_params)
             response, http_code = endpoint(**args)
         except Exception as e:
             traceback.print_exc()
@@ -95,17 +104,43 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return response, http_code
 
-    @staticmethod
-    def _validate_and_convert_args(args: Dict, params: Dict[str, inspect.Parameter]) -> Dict:
+    def _process_args(self, args: Dict, params: Dict[str, Parameter]) -> Dict:
+        pydantic_params, normal_params = self._separate_pydantic_params(params)
         parsed_args = {}
-        for arg_name, param in params.items():
+
+        for arg_name, param in normal_params.items():
             arg_value = args.get(arg_name)
+            converted_value = self._validate_and_convert_arg(arg_name, arg_value, param)
+            parsed_args[arg_name] = converted_value
 
-            Validator.validate(arg_name, arg_value, param)
+        if json_data := args.get('__json_data'):
+            for param_name, obj in self._json_to_models(json_data, pydantic_params):
+                parsed_args[param_name] = obj
 
-            value = Converter.convert(arg_name, arg_value, param)
-            parsed_args[arg_name] = value
         return parsed_args
+
+    @staticmethod
+    def _separate_pydantic_params(params: Dict[str, Parameter]) -> Tuple[Dict[str, Parameter], Dict[str, Parameter]]:
+        pydantic_params = {}
+        other_params = {}
+        for name, param in params.items():
+            if issubclass(param.annotation, pydantic.BaseModel):
+                pydantic_params[name] = param
+            else:
+                other_params[name] = param
+        return pydantic_params, other_params
+
+    @staticmethod
+    def _validate_and_convert_arg(name: str, value: any, param: Parameter):
+        Validator.validate(name, value, param)
+        return Converter.convert(name, value, param)
+
+    @staticmethod
+    def _json_to_models(json_data: Dict, pydantic_params: Dict[str, Parameter]):
+        for param in pydantic_params.values():
+            model: typing.Type[pydantic.BaseModel] = param.annotation
+            obj = model(**json_data)
+            yield param.name, obj
 
     def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)

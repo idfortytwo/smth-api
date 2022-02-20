@@ -1,7 +1,16 @@
 import cgi
+import json
+from http.server import BaseHTTPRequestHandler
 
 
 class RequestParser:
+    @staticmethod
+    def parse_json(request: BaseHTTPRequestHandler):
+        content_length = int(request.headers['Content-Length'])
+        body_encoded = request.rfile.read(content_length)
+        body = body_encoded.decode()
+        return json.loads(body)
+
     @staticmethod
     def parse_multipart(content, content_type: str):
         ctype, pdict = cgi.parse_header(content_type)
