@@ -11,16 +11,11 @@ from inspect import Parameter
 
 from endpoint import Endpoint, not_found_endpoint
 from server.converter import Converter
-from server.request_parser import RequestParser
+from server.parsers import RequestParser, JsonParser
 from server.validator import Validator
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    HTTP_CODES = [
-        100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 226, 300, 301, 302, 303, 304, 305, 306, 307, 308,
-        400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 415, 416, 417, 418, 421, 422, 423, 424,
-        425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505, 506, 507, 508, 510, 511]
-
     @classmethod
     def register_routes(cls, routing_map: Dict):
         cls._routing_map: Dict[re.Pattern, Tuple[List[str], Endpoint]] = routing_map
@@ -94,41 +89,45 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             endpoint_params: Dict[str, Parameter] = endpoint.params
             args = self._process_args(args, endpoint_params)
-            response, http_code = endpoint(**args)
+            response = endpoint(**args)
+
         except Exception as e:
             traceback.print_exc()
             return {'error_msg': str(e)}, 500
 
-        if http_code not in self.HTTP_CODES:
-            raise ValueError(f'Invalid response code {http_code} for endpoint {endpoint.func}')
-
-        return response, http_code
+        return response.body, response.status_code
 
     def _process_args(self, args: Dict, params: Dict[str, Parameter]) -> Dict:
-        pydantic_params, normal_params = self._separate_pydantic_params(params)
+        complex_params, primitive_params = self._separate_params(params)
         parsed_args = {}
 
-        for arg_name, param in normal_params.items():
-            arg_value = args.get(arg_name)
-            converted_value = self._validate_and_convert_arg(arg_name, arg_value, param)
-            parsed_args[arg_name] = converted_value
+        json_data = args.get('__json_data')
 
-        if json_data := args.get('__json_data'):
-            for param_name, obj in self._json_to_models(json_data, pydantic_params):
-                parsed_args[param_name] = obj
+        for arg_name, param in primitive_params.items():
+            if arg_name == 'json_data':
+                value = json_data
+            else:
+                arg_value = args.get(arg_name)
+                value = self._validate_and_convert_arg(arg_name, arg_value, param)
+
+            parsed_args[arg_name] = value
+
+        if json_data:
+            complex_args = self._parse_json(json_data, complex_params)
+            return {**parsed_args, **complex_args}
 
         return parsed_args
 
     @staticmethod
-    def _separate_pydantic_params(params: Dict[str, Parameter]) -> Tuple[Dict[str, Parameter], Dict[str, Parameter]]:
-        pydantic_params = {}
-        other_params = {}
+    def _separate_params(params: Dict[str, Parameter]) -> Tuple[Dict[str, Parameter], Dict[str, Parameter]]:
+        complex_params, primitive_params = {}, {}
         for name, param in params.items():
-            if issubclass(param.annotation, pydantic.BaseModel):
-                pydantic_params[name] = param
+            annotation = param.annotation
+            if typing.get_origin(annotation) or issubclass(annotation, pydantic.BaseModel):
+                complex_params[name] = param
             else:
-                other_params[name] = param
-        return pydantic_params, other_params
+                primitive_params[name] = param
+        return complex_params, primitive_params
 
     @staticmethod
     def _validate_and_convert_arg(name: str, value: any, param: Parameter):
@@ -136,11 +135,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         return Converter.convert(name, value, param)
 
     @staticmethod
-    def _json_to_models(json_data: Dict, pydantic_params: Dict[str, Parameter]):
-        for param in pydantic_params.values():
-            model: typing.Type[pydantic.BaseModel] = param.annotation
-            obj = model(**json_data)
-            yield param.name, obj
+    def _parse_json(json_data: Dict, params: Dict[str, Parameter]):
+        return {
+            name: JsonParser.parse(json_data, param.annotation)
+            for name, param
+            in params.items()
+        }
 
     def _send(self, response_body: str, http_code: int):
         self.send_response(http_code)

@@ -2,6 +2,8 @@ import inspect
 
 from typing import Callable, Dict
 
+from response import Response
+
 
 class Endpoint:
     def __init__(self, func: Callable):
@@ -20,13 +22,12 @@ class Endpoint:
         sig = inspect.signature(self._func)
         return dict(sig.parameters)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, **kwargs) -> Response:
         result = self._func(*args, **kwargs)
-        match result:
-            case response, http_code:
-                return response, http_code
-            case response:
-                return response, 200
+        if isinstance(result, tuple):
+            return Response(body=result[0], status_code=result[1])
+        else:
+            return Response(body=result, status_code=200)
 
     def __repr__(self):
         return f"Endpoint('{self._func.__name__}')"

@@ -50,9 +50,17 @@ def person_and_numbers_pydantic(person: Person, numbers: Numbers):
     return f'hemlo, {name}'
 
 
-@app.route('/patch', http_methods=['PATCH'])
-def patch():
-    return 'patching something'
+@app.route('/people', http_methods=['POST'])
+def person_pydantic(people: List[Person]):
+    for person in people:
+        print(person)
+    return 'works'
+
+
+@app.route('/just_json', http_methods=['POST'])
+def just_json(json_data):
+    pprint(json_data, indent=4)
+    return json_data
 
 
 @app.route('/invalid_code', http_methods=['GET'])
