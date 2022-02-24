@@ -44,15 +44,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
     def _handle_request(self):
-        url, query_str = self._split_url_and_query(self.path)
+        url, url_query = self._split_url_and_query(self.path)
+        endpoint, url_match = self._get_endpoint_and_url_match(url=url, http_method=self.command)
 
-        endpoint, positional_params = self._get_endpoint_and_positional_params(url=url, http_method=self.command)
-        named_params = self._extract_named_params(query_str)
-        params = {**named_params, **positional_params}
-
-        self._extract_json(params)
-
+        params = self._extract_params(url_query, url_match) if url_match else {}
         response, http_code = self._process_endpoint(endpoint, params)
+
         response_json = json.dumps(response)
         self._send(response_json, http_code)
 
@@ -62,15 +59,30 @@ class RequestHandler(BaseHTTPRequestHandler):
         query_pos = query_index if query_index != -1 else len(url)
         return url[:query_pos], url[query_pos + 1:]
 
-    def _get_endpoint_and_positional_params(self, url: str, http_method: str):
+    def _get_endpoint_and_url_match(self, url: str, http_method: str) -> Tuple[Endpoint, re.Match | None]:
         for regex, (http_methods, endpoint) in self._routing_map.items():
-            m = regex.match(url)
-            if m and endpoint and http_method in http_methods:
-                return endpoint, m.groupdict()
+            url_match = regex.match(url)
+            if url_match and endpoint and http_method in http_methods:
+                return endpoint, url_match
 
-        return not_found_endpoint, {}
+        return not_found_endpoint, None
 
-    def _extract_named_params(self, query_str: str):
+    def _extract_params(self, url_query: str, url_match: re.Match):
+        url_params = self._extract_url_params(url_query)
+        form_params = self._extract_form_params()
+        positional_params = url_match.groupdict()
+        params = {**url_params, **form_params, **positional_params}
+
+        if json_data := self._extract_json():
+            params['json_data'] = json_data
+
+        return params
+
+    @staticmethod
+    def _extract_url_params(url_query: str):
+        return RequestParser.parse_query_str(url_query)
+
+    def _extract_form_params(self):
         content_type = self.headers['Content-Type']
         if content_type:
             if content_type == 'application/x-www-form-urlencoded':
@@ -78,12 +90,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return RequestParser.parse_urlencoded(self.rfile, content_length)
             elif content_type.split(';')[0] == 'multipart/form-data':
                 return RequestParser.parse_multipart(self.rfile, content_type)
-        return RequestParser.parse_query_str(query_str)
+        return {}
 
-    def _extract_json(self, params: Dict[str, any]):
+    def _extract_json(self):
         if self.headers['Content-Type'] == 'application/json':
-            json_data = RequestParser.parse_json(self)
-            params['__json_data'] = json_data
+            return RequestParser.parse_json(self)
 
     def _process_endpoint(self, endpoint: Endpoint, args: Dict) -> Tuple[any, int]:
         try:
@@ -99,22 +110,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _process_args(self, args: Dict, params: Dict[str, Parameter]) -> Dict:
         complex_params, primitive_params = self._separate_params(params)
-        parsed_args = {}
 
-        json_data = args.get('__json_data')
-
-        for arg_name, param in primitive_params.items():
-            if arg_name == 'json_data':
-                value = json_data
-            else:
-                arg_value = args.get(arg_name)
-                value = self._validate_and_convert_arg(arg_name, arg_value, param)
-
-            parsed_args[arg_name] = value
+        json_data = args.get('json_data')
+        parsed_args = self._process_primitive_params(args, params, json_data)
 
         if json_data:
             complex_args = self._parse_json(json_data, complex_params)
-            return {**parsed_args, **complex_args}
+            parsed_args.update(complex_args)
 
         return parsed_args
 
@@ -128,6 +130,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 primitive_params[name] = param
         return complex_params, primitive_params
+
+    def _process_primitive_params(self, args: Dict, params: Dict[str, Parameter], json_data: Dict = None):
+        parsed_args = {}
+        for arg_name, param in params.items():
+            if arg_name == 'json_data':
+                value = json_data
+            else:
+                arg_value = args.get(arg_name)
+                value = self._validate_and_convert_arg(arg_name, arg_value, param)
+            parsed_args[arg_name] = value
+        return parsed_args
 
     @staticmethod
     def _validate_and_convert_arg(name: str, value: any, param: Parameter):
