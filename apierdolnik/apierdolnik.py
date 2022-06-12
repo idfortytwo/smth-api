@@ -8,7 +8,7 @@ from endpoint import Endpoint
 from server.request_handler import RequestHandler
 
 
-class Pierdolnik:
+class APIerdolnik:
     def __init__(self, host='localhost', port=8080) -> None:
         self._host = host
         self._port = port

@@ -2,10 +2,9 @@ from pprint import pprint
 from typing import Optional, List, Union
 from pydantic import BaseModel
 
-from pierdolnik import Pierdolnik
+from apierdolnik import APIerdolnik
 
-
-app = Pierdolnik()
+app = APIerdolnik()
 
 
 @app.route('/:title/:uid/params', http_methods=['GET', 'POST'])
