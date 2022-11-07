@@ -1,4 +1,4 @@
-# APIerdolnik
+# SomethingAPI
 
 Minimalistic Python web framework - in development
 
@@ -10,9 +10,9 @@ Minimalistic Python web framework - in development
 
 ## Examples
 ```python
-from apierdolnik import APIerdolnik
+from smthapi import SomethingAPI
 
-app = APIerdolnik(host='localhost', port=8080)
+app = SomethingAPI(host='localhost', port=8080)
 
 
 # optional and required, positional and query params

@@ -2,9 +2,9 @@ from pprint import pprint
 from typing import Optional, List, Union
 from pydantic import BaseModel
 
-from apierdolnik import APIerdolnik
+from smthapi import SomethingAPI
 
-app = APIerdolnik()
+app = SomethingAPI()
 
 
 @app.route('/:title/:uid/params', http_methods=['GET', 'POST'])
